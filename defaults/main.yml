@@ -7,6 +7,13 @@ mssql_installation_path: C:\SQLInstall
 # Temporary path to store downloader
 mssql_temp_download_path: C:\tmp
 
+# Service Account Type: domain or local
+mssql_service_acct_type: domain
+
+# mssql_media_type: extractable_exe or iso
+# This is designed to support both Developer installs and installs through iso files (in case you point mssql_installation_source to an iso)
+mssql_media_type: extractable_exe
+
 # instance details
 mssql_instance_name: Test
 mssql_drive: C
@@ -73,10 +80,16 @@ mssql_sqltempDBlog_path: "C:\\TempDBFiles\\Log\\{{mssql_instance_name }}"
 # security mode - SQL indicates mixed-mode auth, while Windows indicates Windows Auth.
 mssql_security_mode: sql
 
+# SA username as required by SAPwd_username - which is required when you have/use SAPwd_password which is required when SecurityMode/mssql_security_mode = sql
+mssql_sa_username: sa
+
 # SA user password, if security mode is set to 'SQL'
 # by default for testing we'll be lazy and use the service account password,
 # but on live systems you should use something else:
 mssql_sa_password: "{{ mssql_sqlsvc_account_pass }}"
+
+
+
 
 # features - Comma seperated list of features to be installed
 #
