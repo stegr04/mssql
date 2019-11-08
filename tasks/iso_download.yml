@@ -1,0 +1,11 @@
+---
+- name: Fetch SQL Media Downloader
+  win_get_url:
+    url: "{{ mssql_installation_source }}"
+    dest: "{{ mssql_temp_download_path }}\\en_sql_server_2016_developer_with_service_pack_2_x64_dvd_12194995.iso"
+
+- name: mount the downloaded iso
+  win_disk_image:
+    image_path: "{{ mssql_temp_download_path }}\\en_sql_server_2016_developer_with_service_pack_2_x64_dvd_12194995.iso"
+    state: present
+  register: disk_image_out

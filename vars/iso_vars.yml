@@ -1,0 +1,1 @@
+mssql_install_sourcepath: "{{ disk_image_out.mount_path }}"

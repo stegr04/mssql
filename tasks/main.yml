@@ -52,41 +52,8 @@
     state: present
     include_sub_features: True
 
-# Setup service accounts
-#
-# We delegate this process to our domain controller since the required AD services are there for
-# win_domain_user to interact with. 
-- name: Active Directory | Ensure SQL Service account is present
-  win_domain_user:
-    name: "{{ mssql_sqlsvc_account | regex_search('[^\\\\]*$') }}"
-    firstname: "{{ mssql_instance_name }}"
-    surname: SQLSvc
-    password: "{{ mssql_sqlsvc_account_pass }}"
-    password_never_expires: yes
-    user_cannot_change_password: yes
-    description: "SQL Service account for {{ inventory_hostname }}\\{{ mssql_instance_name }}"
-    state: present
-    path: "{{ mssql_base_ldap_path }}"
-    groups:
-      - Domain Users
-  tags: service_account
-  delegate_to: "{{ domain_controller }}"
-
-- name: Active Directory | Ensure SQL Agent Service account is present
-  win_domain_user:
-    name: "{{ mssql_agentsvc_account | regex_search('[^\\\\]*$') }}"
-    firstname: "{{ mssql_instance_name }}"
-    surname: AgentSvc
-    password: "{{ mssql_agentsvc_account_pass }}"
-    password_never_expires: yes
-    user_cannot_change_password: yes
-    description: "SQL Agent service account for {{ inventory_hostname }}\\{{ mssql_instance_name }}"
-    state: present
-    path: "{{ mssql_base_ldap_path }}"
-    groups:
-      - Domain Users
-  delegate_to: "{{ domain_controller }}"
-  tags: service_account
+- name: Setup service accounts
+  include_tasks: "{{ mssql_service_acct_type }}_users.yml"
 
 # SQL install may fail if a pending reboot is detected
 # Assuming we are allowed to reboot this step will check for pending reboots
@@ -101,83 +68,22 @@
 
 - meta: flush_handlers
 
-- name: Fetch SQL Media Downloader
-  win_get_url:
-    url: "{{ mssql_installation_source }}"
-    dest: "{{ mssql_temp_download_path }}\\SQLServer2017-SSEI-Dev.exe"
-
-- name: Use Media Downloader to fetch SQL Installation CABs to {{ mssql_installation_path }}
-  win_shell: "{{ mssql_temp_download_path }}\\SQLServer2017-SSEI-Dev.exe /Action=Download /MediaPath={{ mssql_installation_path }} /MediaType=CAB /Quiet"
-
-# Job will fail if extracted media folder is not empty, quick step to ensure it's empty
-- name: Ensure installation media extraction path is empty
+# win_get_url will fail if the mssql_temp_download_path directory does not exist.
+- name: create the temp_download_path if it doesn't exist
   win_file:
-    path: "{{ mssql_installation_path }}\\Media"
-    state: absent
+    path: "{{ mssql_temp_download_path }}"
+    state: directory
 
-- name: Extract installation media
-  win_shell: "{{ mssql_installation_path }}\\SQLServer2017-DEV-x64-ENU.exe /X:{{ mssql_installation_path }}\\Media /Q"
-# If this step fails, logs are in C:\Program Files\Microsoft SQL Server\...\Setup Bootstrap\Log
-# it will often contain the actual error.  If it shows everything passing, the issue is within the DSC logs.
-# 
-# This module also typically throws this error fpr all failure conditions:
-# PowerShell DSC resource MSFT_SqlSetup  failed to execute Set-TargetResource functionality with error message: 
-# System.Exception: Test-TargetResource returned false after calling Set-TargetResource.
-#
-#
-# This document can also be useful to troubleshoot issues with DSC modules
-# https://docs.microsoft.com/en-us/powershell/dsc/troubleshooting 
-#
-# In particular completing these steps:
-# https://docs.microsoft.com/en-us/powershell/dsc/troubleshooting#gathering-events-from-a-single-dsc-operation
-# then re-running a failing PowershellDSC job can help you find the source of your error
-- name: Install SQL Server
-  win_dsc:
-    resource_name: SQLSetup
-    Action: Install
-    UpdateEnabled: True
-    SourcePath: "{{ mssql_installation_path }}\\Media"
-    InstanceName: "{{ mssql_instance_name }}"
-    InstallSharedDir: "{{ mssql_installshared_path }}"
-    InstallSharedwowDir: "{{ mssql_installsharedwow_path }}"
-    InstanceDir: "{{ mssql_instance_path }}"
-    InstallSQLDataDir: "{{ mssql_sqlinstalldata_path }}"
-    SQLUserDBDir: "{{ mssql_sqluserdata_path }}"
-    SQLUserDBLogDir: "{{ mssql_sqluserlog_path }}"
-    SQLTempDBDir: "{{ mssql_sqltempDB_path }}"
-    SQLTempDBLogDir: "{{ mssql_sqltempDBlog_path }}"
-    Features: "{{ mssql_features }}"
-    SQLCollation: "{{ mssql_collation }}"
-    BrowserSvcStartupType: "{{ mssql_browsersvc_mode }}"
-    SuppressReboot: "{{ mssql_suppress_reboot }}"
-    # Service Accounts
-    #
-    # If the type of the DSC resource option is a PSCredential then 
-    # there needs to be 2 options set in the Ansible task definition 
-    # suffixed with _username and _password. So we will be providing 
-    # two options for these normally single option items.
+- name: Get installation media
+  include_tasks: "{{ mssql_media_type }}_download.yml"
+  
+# The iso_vars.yml depends on a registered variable that is registered in during the Get install Media task.
+- name: Get SourcePath variable.
+  include_vars: "{{ mssql_media_type }}_vars.yml"
+  
+- name: Run SQL Server Installation
+  include_tasks: "{{ mssql_security_mode }}_install.yml"
 
-    # SQL Service Account
-    SQLSvcAccount_username: "{{ mssql_sqlsvc_account }}"
-    SQLSvcAccount_password: "{{ mssql_sqlsvc_account_pass }}"
-    # SQL Agent Service Account
-    AgtSvcAccount_username: "{{ mssql_agentsvc_account }}"
-    AgtSvcAccount_password: "{{ mssql_agentsvc_account_pass }}"
-    # SQL Analysis Services Account
-    ASSvcAccount_username: "{{ mssql_assvc_account }}"
-    ASSvcAccount_password: "{{ mssql_assvc_account_pass }}"
-
-    # Used when installing on a network path, comment out 
-    # SourceCredential_username: "{{ ansible_user }}"
-    # SourceCredential_password: "{{ ansible_password }}"
-
-    # System Admins 
-    SQLSysAdminAccounts: "{{ mssql_sysadmin_accounts }}"
-    # Analysis Services Admins (if installed)
-    ASSysAdminAccounts: "{{ mssql_asadmin_accounts }}"
-  tags: install_sql
-
-# End of win_dsc for SQL Server
 
 # Firewall configuration
 - name: Firewall | Allow Database Engine for instance
